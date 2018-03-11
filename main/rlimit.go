@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"gopkg.in/urfave/cli.v1"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -11,31 +10,33 @@ import (
 	"os"
 	"sync/atomic"
 	"time"
+
+	"github.com/tkawachi/rlimit"
+	"gopkg.in/urfave/cli.v1"
 )
 
 type LimitedRoundTripper struct {
-	ch       chan int
-	inner    http.RoundTripper
-	nWaiting uint32
+	ch         chan int
+	inner      http.RoundTripper
+	nWaiting   uint32
+	maxWaiting uint32
+	rate       rlimit.Rate
 }
 
-func NewLimitedRoundTripper(rt http.RoundTripper) *LimitedRoundTripper {
+func NewLimitedRoundTripper(inner http.RoundTripper, rate rlimit.Rate, maxWaiting uint32) *LimitedRoundTripper {
 	return &LimitedRoundTripper{
-		ch:       make(chan int, 2),
-		inner:    rt,
-		nWaiting: 0,
+		ch:         make(chan int, rate.Count),
+		inner:      inner,
+		nWaiting:   0,
+		maxWaiting: maxWaiting,
+		rate:       rate,
 	}
 }
 
 func (lrt *LimitedRoundTripper) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 
-	tooManyRequestsThreshold := uint32(2)
-
 	waiting := atomic.LoadUint32(&lrt.nWaiting)
-	if waiting > tooManyRequestsThreshold {
-		if req.Body != nil {
-			err = req.Body.Close()
-		}
+	if waiting > lrt.maxWaiting {
 		resp = &http.Response{
 			// Request: req,
 			StatusCode: 429,
@@ -45,14 +46,13 @@ func (lrt *LimitedRoundTripper) RoundTrip(req *http.Request) (resp *http.Respons
 		return
 	}
 	someInt := 0
-	duration := 3 * time.Second
 
 	atomic.AddUint32(&lrt.nWaiting, 1)
 	lrt.ch <- someInt
 	atomic.AddUint32(&lrt.nWaiting, ^uint32(0)) // decrement
 	defer func() {
 		go func() {
-			time.Sleep(duration)
+			time.Sleep(lrt.rate.Duration)
 			<-lrt.ch
 		}()
 	}()
@@ -78,15 +78,15 @@ func main() {
 }
 func action(c *cli.Context) (err error) {
 
-	forwardUrl, err := url.Parse(c.String("forward"))
+	forwardURL, err := url.Parse(c.String("forward"))
 	if err != nil {
 		return
 	}
 
 	director := func(request *http.Request) {
 		url := *request.URL
-		url.Scheme = forwardUrl.Scheme
-		url.Host = forwardUrl.Host
+		url.Scheme = forwardURL.Scheme
+		url.Host = forwardURL.Host
 
 		req, err := http.NewRequest(request.Method, url.String(), request.Body)
 		if err != nil {
@@ -96,7 +96,7 @@ func action(c *cli.Context) (err error) {
 		*request = *req
 	}
 
-	rt := NewLimitedRoundTripper(http.DefaultTransport)
+	rt := NewLimitedRoundTripper(http.DefaultTransport, rlimit.Rate{Count: 3, Duration: 1 * time.Second}, 2)
 
 	rp := &httputil.ReverseProxy{Director: director, Transport: rt}
 	server := http.Server{
