@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 	"net/http/httputil"
-	"net/url"
 	"os"
 	"sync/atomic"
 	"time"
@@ -77,9 +76,9 @@ func main() {
 	}
 }
 func action(c *cli.Context) (err error) {
-
-	forwardURL, err := url.Parse(c.String("forward"))
+	forwardURL, err := rlimit.ParseURL(c.String("forward"))
 	if err != nil {
+		log.Println("Specify a forward URL with --forward.")
 		return
 	}
 
