@@ -65,30 +65,31 @@ func main() {
 	app.Version = "0.0.1-SNAPSHOT"
 	app.Usage = "Rate limit HTTP proxy"
 
-	app.Flags = []cli.Flag{
-		cli.StringFlag{
-			Name:  "forward",
-			Usage: "Forward `URL`",
-		},
-		cli.UintFlag{
-			Name:  "port, p",
-			Usage: "Listen `port` number",
-			Value: 9000,
+	app.Commands = []cli.Command{
+		{
+			Name:      "run",
+			Usage:     "Run proxy",
+			Action:    runProxy,
+			ArgsUsage: "forwardURL",
+			Flags: []cli.Flag{
+				cli.UintFlag{
+					Name:  "port, p",
+					Usage: "Listen `port` number",
+					Value: 9000,
+				},
+			},
 		},
 	}
-
-	app.Action = action
 	err := app.Run(os.Args)
 	if err != nil {
 		log.Fatal(err)
 	}
 }
-func action(c *cli.Context) (err error) {
-	forwardURL, err := rlimit.ParseURL(c.String("forward"))
-	if err != nil {
-		log.Println("Specify a forward URL with --forward.")
-		return
+func runProxy(c *cli.Context) (err error) {
+	if c.NArg() != 1 {
+		log.Fatalln("forwardURL must be specified.")
 	}
+	forwardURL, err := rlimit.ParseURL(c.Args().Get(0))
 
 	director := func(request *http.Request) {
 		url := *request.URL
