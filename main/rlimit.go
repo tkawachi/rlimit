@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -61,11 +62,18 @@ func (lrt *LimitedRoundTripper) RoundTrip(req *http.Request) (resp *http.Respons
 func main() {
 	app := cli.NewApp()
 	app.Name = "rlimit"
+	app.Version = "0.0.1-SNAPSHOT"
+	app.Usage = "Rate limit HTTP proxy"
 
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
 			Name:  "forward",
 			Usage: "Forward `URL`",
+		},
+		cli.UintFlag{
+			Name:  "port, p",
+			Usage: "Listen `port` number",
+			Value: 9000,
 		},
 	}
 
@@ -98,8 +106,12 @@ func action(c *cli.Context) (err error) {
 	rt := NewLimitedRoundTripper(http.DefaultTransport, rlimit.Rate{Count: 3, Duration: 1 * time.Second}, 2)
 
 	rp := &httputil.ReverseProxy{Director: director, Transport: rt}
+	port := c.Uint("port")
+	addr := fmt.Sprintf(":%d", port)
+	log.Println("Lisning on", addr)
+
 	server := http.Server{
-		Addr:    ":9000",
+		Addr:    addr,
 		Handler: rp,
 	}
 	return server.ListenAndServe()
